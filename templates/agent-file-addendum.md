@@ -14,7 +14,7 @@ Never infer a missing predecessor or silently accept request drift.
 
 When schema 2.0 is present, review explicit documentation language, naming
 profile, portable roles, resolved paths, hashes, receipts, references, and
-exactly one evidenced `Eligible` candidate. Implementation language and locale
+exactly one evidenced `Eligible` candidate for an active delivery series, and none for a `Completed` series. Implementation language and locale
 are not documentation-language evidence. A Ready review grants neither
 implementation nor remote authority.
 

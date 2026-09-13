@@ -54,8 +54,7 @@ return `NeedsClarification`.
 When `requirements/intake-governance-config.json` exists, validate schema 2.0
 before semantic review. The explicit BCP-47 documentation language, naming
 profile, four portable roles, collection paths, bounded aliases, canonical
-index, current hashes, active Series inventory, and exactly one evidenced
-`Eligible` candidate must agree. Eligibility selects the next intake but grants
+index, current hashes, active Series inventory, and lifecycle must agree: one `Eligible` candidate for an active delivery series, none for a `Completed` series. Eligibility selects the next intake but grants
 no implementation or remote-delivery authority.
 
 ## Consumer Contract
