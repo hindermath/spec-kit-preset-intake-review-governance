@@ -1,6 +1,13 @@
 # Intake Review Governance Preset
 
-Aktuelle Version / Current version: **0.2.4**. Laufende `Active`-Serien mit
+Patch **0.2.5** liefert die verbesserte zweisprachige Einstiegs- und
+Kompositionsdokumentation. Verhalten und Berechtigungsgrenzen bleiben erhalten.
+[Release-Nachweis / Release record](docs/release-0.2.5-validation.md).
+
+*Patch 0.2.5 packages the improved bilingual getting-started and composition
+guide. Behavior and authority boundaries remain unchanged.*
+
+Aktuelle Version / Current version: **0.2.5**. Laufende `Active`-Serien mit
 mindestens einem `Active`-Mitglied bleiben ohne weiteren `Eligible`-Kandidaten
 gueltig; `eligibleCandidate` ist dann `N/A`. `Ready` verlangt weiterhin genau
 einen Kandidaten. Mehrfachkandidaten, Hash-, Pfad- und Abhaengigkeitsfehler
@@ -109,7 +116,7 @@ Leserpfad / Reader path: [Install](#install) → [Commands](#commands) →
 ## Install
 
 ```bash
-specify preset add --from https://github.com/hindermath/spec-kit-preset-intake-review-governance/archive/refs/tags/v0.2.4.zip --priority 65
+specify preset add --from https://github.com/hindermath/spec-kit-preset-intake-review-governance/archive/refs/tags/v0.2.5.zip --priority 65
 specify preset list
 specify preset resolve intake-review-policy-template
 ```
