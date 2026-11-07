@@ -23,7 +23,7 @@ function Invoke-Validator([string]$Kind, [int]$ExpectedExit) {
             --result (Join-Path $TempRoot 'result.json') --repo $TempRoot 2>&1
     }
     if ($LASTEXITCODE -ne $ExpectedExit) {
-        throw "$Kind expected exit $ExpectedExit, got $LASTEXITCODE`: $Output"
+        throw "$Kind at test line $($MyInvocation.ScriptLineNumber) expected exit $ExpectedExit, got $LASTEXITCODE`: $Output"
     }
     return ($Output -join "`n")
 }
@@ -149,6 +149,78 @@ try {
     })
     $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
     [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+
+    $Result.findings = @([ordered]@{
+        id = 'IR001'; severity = 'Medium'; category = 'Security'; target = 'intakes/a.md'
+        disposition = 'AcceptedRisk'; owner = 'Human reviewer'; evidence = 'review evidence'
+        reevaluationTrigger = 'next review'
+    })
+    $Result.summary.medium = 1
+    $Result.acceptedRisks[0].acceptedByType = 'Human'
+    $Result.acceptedRisks[0].owner = 'Human reviewer'
+    $Result.acceptedRisks[0].severity = 'Medium'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 0); [void](Invoke-Validator PowerShell 0)
+
+    $ValidFindings = $Result.findings
+    $Result.findings = $ValidFindings[0]
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.findings = $ValidFindings
+
+    $ValidRisks = $Result.acceptedRisks
+    $Result.acceptedRisks = $ValidRisks[0]
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.acceptedRisks = $ValidRisks
+
+    $Result.findings[0].severity = 'medium'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.findings[0].severity = 'Medium'
+
+    $Result.acceptedRisks[0].acceptedByType = 'human'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.acceptedRisks[0].acceptedByType = 'Human'
+
+    $Result.acceptedRisks[0].findingId = 'IR999'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.acceptedRisks[0].findingId = 'IR001'
+
+    $Result.acceptedRisks[0].severity = 'Low'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.acceptedRisks[0].severity = 'Medium'
+
+    $Result.findings[0].id = @('IR001')
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.findings[0].id = 'IR001'
+
+    $Result.findings[0].id = 'ir001'
+    $Result.acceptedRisks[0].findingId = 'ir001'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.findings[0].id = 'IR001'
+    $Result.acceptedRisks[0].findingId = 'IR001'
+
+    $Result.acceptedRisks[0].findingId = @('IR001')
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.acceptedRisks[0].findingId = 'IR001'
+
+    $Result.status = 'Ready'
+    $Result.acceptedRisks = @()
+    $Result.findings[0].disposition = 'Open'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+
+    $Result.status = 'ready'
+    $Result | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $TempRoot 'result.json') -Encoding utf8NoBOM
+    [void](Invoke-Validator Bash 2); [void](Invoke-Validator PowerShell 2)
+    $Result.status = 'Ready'
 
     Reset-SeriesFixture
     $BashSeriesPass = Invoke-Validator Bash 0

@@ -278,12 +278,36 @@ if status in accepted and (severity_counts["Critical"] or severity_counts["High"
     errors.append("Critical or High findings block an accepted status")
 if status == "Ready" and risks: errors.append("Ready cannot contain accepted risks")
 if status == "ReadyWithAcceptedRisks" and not risks: errors.append("ReadyWithAcceptedRisks needs acceptedRisks")
+residual_findings = {}
+if status in accepted:
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        disposition = finding.get("disposition")
+        if disposition not in ("Resolved", "Remediated", "AcceptedRisk"):
+            errors.append("accepted status cannot retain an open finding")
+        if disposition == "AcceptedRisk":
+            residual_id = required_text(finding, "id", "residual finding")
+            residual_findings[residual_id] = finding.get("severity")
+    if status == "Ready" and residual_findings:
+        errors.append("Ready cannot retain residual findings")
+risk_ids = set()
 for i, risk in enumerate(risks):
     label = f"acceptedRisks[{i}]"
+    if not isinstance(risk, dict):
+        errors.append(f"{label} must be an object")
+        continue
     if required_text(risk, "severity", label) not in ("Medium", "Low"): errors.append(f"{label}.severity must be Medium or Low")
     for field in ("findingId", "owner", "rationale", "acceptedAt", "evidence", "reevaluationTrigger"):
         required_text(risk, field, label)
     if risk.get("acceptedByType") != "Human": errors.append(f"{label}.acceptedByType must be Human")
+    if status in accepted:
+        risk_id = required_text(risk, "findingId", label)
+        if risk_id in risk_ids or residual_findings.get(risk_id) != risk.get("severity"):
+            errors.append(f"{label} must uniquely match a residual finding and severity")
+        risk_ids.add(risk_id)
+if status in accepted and set(residual_findings) != risk_ids:
+    errors.append("every residual finding requires matching human risk acceptance")
 for i, exception in enumerate(exceptions):
     label = f"operatorExceptions[{i}]"
     for field in ("exceptionId", "author", "reason", "date", "expiry"):

@@ -31,7 +31,10 @@ function Test-IntakeReviewResult {
         return $Property.Value
     }
     function Get-Text([object]$Object, [string]$Name, [string]$Label) {
-        $Value = Get-Prop $Object $Name
+        # Inspect the raw property value: a singleton JSON array is not text.
+        $Property = if ($null -ne $Object) { $Object.PSObject.Properties[$Name] } else { $null }
+        $Value = $null
+        if ($null -ne $Property) { $Value = $Property.Value }
         if ($Value -is [DateTime]) {
             return $Value.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.FFFFFFFZ', [Globalization.CultureInfo]::InvariantCulture)
         }
@@ -73,13 +76,13 @@ function Test-IntakeReviewResult {
     $Guid = [Guid]::Empty
     if (-not [Guid]::TryParse($ReviewId, [ref]$Guid) -or $Guid -eq [Guid]::Empty) { $Errors.Add('reviewId must be a non-zero UUID') }
     $Mode = Get-Text $Data 'mode' 'result'
-    if ($Mode -notin @('Single', 'Series', 'Campaign')) { $Errors.Add('mode is invalid') }
-    if ($Mode -eq 'Series' -and $SchemaVersion -ne '1.1') {
+    if ($Mode -cnotin @('Single', 'Series', 'Campaign')) { $Errors.Add('mode is invalid') }
+    if ($Mode -ceq 'Series' -and $SchemaVersion -cne '1.1') {
         Add-GraphError 'IRG001' 'Series result schemaVersion must be 1.1'
     }
     $Status = Get-Text $Data 'status' 'result'
     $Accepted = @('Ready', 'ReadyWithAcceptedRisks')
-    if ($Status -notin ($Accepted + @('NeedsClarification', 'NeedsRemediation', 'Rejected'))) { $Errors.Add('status is invalid') }
+    if ($Status -cnotin ($Accepted + @('NeedsClarification', 'NeedsRemediation', 'Rejected'))) { $Errors.Add('status is invalid') }
     [void](Get-Text $Data 'policy' 'result')
     $ReviewedAt = Get-Text $Data 'reviewedAt' 'result'
     $Timestamp = [DateTimeOffset]::MinValue
@@ -310,14 +313,30 @@ function Test-IntakeReviewResult {
 
     $Counts = @{ Critical = 0; High = 0; Medium = 0; Low = 0 }
     $FindingIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    $Findings = @(Get-Prop $Data 'findings')
+    $ResidualFindings = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+    $FindingsRaw = $Data.PSObject.Properties['findings']
+    if ($null -eq $FindingsRaw -or $FindingsRaw.Value -isnot [Array]) {
+        $Errors.Add('findings must be an array')
+        $Findings = @()
+    } else {
+        $Findings = @($FindingsRaw.Value)
+    }
     for ($Index = 0; $Index -lt $Findings.Count; $Index++) {
         $Finding = $Findings[$Index]; $Label = "findings[$Index]"
         $Id = Get-Text $Finding 'id' $Label
-        if ($Id -notmatch '^IR[0-9]{3,}$' -or -not $FindingIds.Add($Id)) { $Errors.Add("${Label}.id must be a unique IR### identifier") }
+        if ($Id -cnotmatch '^IR[0-9]{3,}$' -or -not $FindingIds.Add($Id)) { $Errors.Add("${Label}.id must be a unique IR### identifier") }
         $Severity = Get-Text $Finding 'severity' $Label
-        if (-not $Counts.ContainsKey($Severity)) { $Errors.Add("${Label}.severity is invalid") } else { $Counts[$Severity]++ }
+        if ($Severity -cnotin @('Critical', 'High', 'Medium', 'Low')) { $Errors.Add("${Label}.severity is invalid") } else { $Counts[$Severity]++ }
         foreach ($Field in @('category', 'target', 'disposition', 'owner', 'evidence', 'reevaluationTrigger')) { [void](Get-Text $Finding $Field $Label) }
+        if ($Status -cin $Accepted) {
+            $Disposition = Get-Text $Finding 'disposition' $Label
+            if ($Disposition -cnotin @('Resolved', 'Remediated', 'AcceptedRisk')) {
+                $Errors.Add('accepted status cannot retain an open finding')
+            }
+            if ($Disposition -ceq 'AcceptedRisk' -and -not $ResidualFindings.ContainsKey($Id)) {
+                $ResidualFindings.Add($Id, $Severity)
+            }
+        }
     }
 
     $QuestionsProperty = $Data.PSObject.Properties['questions']
@@ -329,7 +348,13 @@ function Test-IntakeReviewResult {
     } else {
         $Questions = @($QuestionsRaw)
     }
-    $Risks = @(Get-Prop $Data 'acceptedRisks')
+    $RisksRaw = $Data.PSObject.Properties['acceptedRisks']
+    if ($null -eq $RisksRaw -or $RisksRaw.Value -isnot [Array]) {
+        $Errors.Add('acceptedRisks must be an array')
+        $Risks = @()
+    } else {
+        $Risks = @($RisksRaw.Value)
+    }
     $Exceptions = @(Get-Prop $Data 'operatorExceptions')
     for ($Index = 0; $Index -lt $Questions.Count; $Index++) {
         $Question = $Questions[$Index]; $Label = "questions[$Index]"
@@ -347,11 +372,24 @@ function Test-IntakeReviewResult {
     if ($Status -in $Accepted -and ($Counts.Critical -gt 0 -or $Counts.High -gt 0)) { $Errors.Add('Critical or High findings block an accepted status') }
     if ($Status -eq 'Ready' -and $Risks.Count) { $Errors.Add('Ready cannot contain accepted risks') }
     if ($Status -eq 'ReadyWithAcceptedRisks' -and $Risks.Count -eq 0) { $Errors.Add('ReadyWithAcceptedRisks needs acceptedRisks') }
+    if ($Status -ceq 'Ready' -and $ResidualFindings.Count) { $Errors.Add('Ready cannot retain residual findings') }
+    $RiskIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     for ($Index = 0; $Index -lt $Risks.Count; $Index++) {
         $Risk = $Risks[$Index]; $Label = "acceptedRisks[$Index]"
-        if ((Get-Text $Risk 'severity' $Label) -notin @('Medium', 'Low')) { $Errors.Add("${Label}.severity must be Medium or Low") }
+        if ((Get-Text $Risk 'severity' $Label) -cnotin @('Medium', 'Low')) { $Errors.Add("${Label}.severity must be Medium or Low") }
         foreach ($Field in @('findingId', 'owner', 'rationale', 'acceptedAt', 'evidence', 'reevaluationTrigger')) { [void](Get-Text $Risk $Field $Label) }
-        if ((Get-Prop $Risk 'acceptedByType') -ne 'Human') { $Errors.Add("${Label}.acceptedByType must be Human") }
+        if ((Get-Prop $Risk 'acceptedByType') -cne 'Human') { $Errors.Add("${Label}.acceptedByType must be Human") }
+        if ($Status -cin $Accepted) {
+            $RiskId = Get-Text $Risk 'findingId' $Label
+            $RiskSeverity = Get-Text $Risk 'severity' $Label
+            if (-not $RiskIds.Add($RiskId) -or -not $ResidualFindings.ContainsKey($RiskId) -or
+                ($ResidualFindings.ContainsKey($RiskId) -and $ResidualFindings[$RiskId] -cne $RiskSeverity)) {
+                $Errors.Add("${Label} must uniquely match a residual finding and severity")
+            }
+        }
+    }
+    if ($Status -cin $Accepted -and $ResidualFindings.Count -ne $RiskIds.Count) {
+        $Errors.Add('every residual finding requires matching human risk acceptance')
     }
     for ($Index = 0; $Index -lt $Exceptions.Count; $Index++) {
         $Exception = $Exceptions[$Index]; $Label = "operatorExceptions[$Index]"
