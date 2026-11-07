@@ -320,10 +320,30 @@ function Test-IntakeReviewResult {
         foreach ($Field in @('category', 'target', 'disposition', 'owner', 'evidence', 'reevaluationTrigger')) { [void](Get-Text $Finding $Field $Label) }
     }
 
-    $Questions = @(Get-Prop $Data 'questions')
+    $QuestionsProperty = $Data.PSObject.Properties['questions']
+    $QuestionsRaw = $null
+    if ($QuestionsProperty) { $QuestionsRaw = $QuestionsProperty.Value }
+    if ($QuestionsRaw -isnot [Array]) {
+        $Errors.Add('questions must be an array')
+        $Questions = @()
+    } else {
+        $Questions = @($QuestionsRaw)
+    }
     $Risks = @(Get-Prop $Data 'acceptedRisks')
     $Exceptions = @(Get-Prop $Data 'operatorExceptions')
-    if ($Status -in $Accepted -and @($Questions | Where-Object { (Get-Prop $_ 'status') -ne 'Answered' }).Count) { $Errors.Add('accepted status cannot have unanswered questions') }
+    for ($Index = 0; $Index -lt $Questions.Count; $Index++) {
+        $Question = $Questions[$Index]; $Label = "questions[$Index]"
+        if ($Question -isnot [pscustomobject]) {
+            $Errors.Add("${Label} must be an object")
+            continue
+        }
+        foreach ($Field in @('id', 'owner', 'question')) { [void](Get-Text $Question $Field $Label) }
+        $QuestionStatus = Get-Text $Question 'status' $Label
+        if ($Status -cin $Accepted -and $QuestionStatus -cne 'Answered') { $Errors.Add('accepted status cannot have unanswered questions') }
+        if ($QuestionStatus -ceq 'Answered') {
+            foreach ($Field in @('answer', 'evidence')) { [void](Get-Text $Question $Field $Label) }
+        }
+    }
     if ($Status -in $Accepted -and ($Counts.Critical -gt 0 -or $Counts.High -gt 0)) { $Errors.Add('Critical or High findings block an accepted status') }
     if ($Status -eq 'Ready' -and $Risks.Count) { $Errors.Add('Ready cannot contain accepted risks') }
     if ($Status -eq 'ReadyWithAcceptedRisks' -and $Risks.Count -eq 0) { $Errors.Add('ReadyWithAcceptedRisks needs acceptedRisks') }
@@ -349,7 +369,13 @@ function Test-IntakeReviewResult {
 
     $Coverage = Get-Prop $Data 'coverage'
     $Individual = @(Get-Prop $Coverage 'individual')
-    if ($Individual.Count -ne $TargetPaths.Count -or @($Individual | Where-Object { -not $TargetPaths.Contains([string]$_) }).Count) { $Errors.Add('coverage.individual must contain every target path exactly once') }
+    $IndividualSeen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $IndividualValid = $Individual.Count -eq $TargetPaths.Count
+    foreach ($Path in $Individual) {
+        if ($Path -isnot [string] -or -not $TargetPaths.Contains([string]$Path) -or
+            -not $IndividualSeen.Add([string]$Path)) { $IndividualValid = $false }
+    }
+    if (-not $IndividualValid) { $Errors.Add('coverage.individual must contain every target path exactly once') }
     if ($Mode -eq 'Series' -and @(Get-Prop $Coverage 'series').Count -eq 0) { $Errors.Add('Series mode requires series coverage') }
     if ($Mode -eq 'Campaign') {
         $Workers = @(Get-Prop $Coverage 'workers')

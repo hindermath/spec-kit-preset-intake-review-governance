@@ -231,6 +231,32 @@ try {
         param($Request, $Result)
         $Request.series.roots = @('intakes/a.md', 'intakes/b.md')
     }
+    Invoke-SeriesCase -ExpectedClass 'coverage.individual' -Mutation {
+        param($Request, $Result)
+        $Result.coverage.individual = @('intakes/a.md', 'intakes/a.md', 'intakes/c.md')
+    }
+    Invoke-SeriesCase -ExpectedClass 'questions[0]' -Mutation {
+        param($Request, $Result)
+        $Result.questions = @('not an object')
+    }
+    Invoke-SeriesCase -ExpectedClass 'questions[0].answer' -Mutation {
+        param($Request, $Result)
+        $Result.questions = @([ordered]@{
+            id = 'IRA001'; status = 'Answered'; owner = 'Maintainer'; question = 'Proceed?'; evidence = 'review'
+        })
+    }
+    Invoke-SeriesCase -ExpectedClass 'questions must be an array' -Mutation {
+        param($Request, $Result)
+        $Result.questions = [ordered]@{
+            id = 'IRA001'; status = 'Answered'; owner = 'Maintainer'; question = 'Proceed?'; answer = 'Yes'; evidence = 'review'
+        }
+    }
+    Invoke-SeriesCase -ExpectedClass 'accepted status cannot have unanswered questions' -Mutation {
+        param($Request, $Result)
+        $Result.questions = @([ordered]@{
+            id = 'IRA001'; status = 'answered'; owner = 'Maintainer'; question = 'Proceed?'; answer = 'Yes'; evidence = 'review'
+        })
+    }
 
     Write-Output 'PASS: intake-review validator parity, Series 1.1 graph contract, and negative cases'
 } finally {

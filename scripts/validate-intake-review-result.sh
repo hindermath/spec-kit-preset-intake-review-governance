@@ -261,8 +261,19 @@ exceptions = data.get("operatorExceptions")
 if not isinstance(questions, list): errors.append("questions must be an array"); questions = []
 if not isinstance(risks, list): errors.append("acceptedRisks must be an array"); risks = []
 if not isinstance(exceptions, list): errors.append("operatorExceptions must be an array"); exceptions = []
-open_questions = [q for q in questions if isinstance(q, dict) and q.get("status") != "Answered"]
-if status in accepted and open_questions: errors.append("accepted status cannot have unanswered questions")
+for i, question in enumerate(questions):
+    label = f"questions[{i}]"
+    if not isinstance(question, dict):
+        errors.append(f"{label} must be an object")
+        continue
+    for field in ("id", "owner", "question"):
+        required_text(question, field, label)
+    question_status = required_text(question, "status", label)
+    if status in accepted and question_status != "Answered":
+        errors.append("accepted status cannot have unanswered questions")
+    if question_status == "Answered":
+        for field in ("answer", "evidence"):
+            required_text(question, field, label)
 if status in accepted and (severity_counts["Critical"] or severity_counts["High"]):
     errors.append("Critical or High findings block an accepted status")
 if status == "Ready" and risks: errors.append("Ready cannot contain accepted risks")
@@ -291,7 +302,9 @@ if not isinstance(coverage, dict): errors.append("coverage must be an object"); 
 individual = coverage.get("individual", [])
 series = coverage.get("series", [])
 workers = coverage.get("workers", [])
-if not isinstance(individual, list) or set(individual) != target_paths:
+if (not isinstance(individual, list) or
+    any(not isinstance(path, str) for path in individual) or
+    len(individual) != len(target_paths) or set(individual) != target_paths):
     errors.append("coverage.individual must contain every target path exactly once")
 if mode == "Series" and (not isinstance(series, list) or not series): errors.append("Series mode requires series coverage")
 if mode == "Campaign":
