@@ -67,6 +67,32 @@ function Test-IntakeReviewResult {
         $Hash = [Security.Cryptography.SHA256]::HashData((Get-NormalizedBytes $Path))
         return [Convert]::ToHexString($Hash).ToLowerInvariant()
     }
+    function Resolve-PhysicalReviewPath([string]$Path) {
+        $full = [IO.Path]::GetFullPath($Path)
+        $root = [IO.Path]::GetPathRoot($full)
+        $current = $root
+        foreach ($segment in $full.Substring($root.Length).Split([char[]]@('/', '\'), [StringSplitOptions]::RemoveEmptyEntries)) {
+            $current = [IO.Path]::Combine($current, $segment)
+            $entry = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $resolved = $entry.ResolveLinkTarget($true)
+                if ($null -eq $resolved) { throw "Cannot resolve symlink: $current" }
+                $current = $resolved.FullName
+            }
+        }
+        return [IO.Path]::GetFullPath($current)
+    }
+    function Resolve-ReviewEvidencePath([string]$Relative) {
+        if (-not (Test-Relative $Relative)) { throw 'path must be repository-relative' }
+        $root = Resolve-PhysicalReviewPath ([IO.Path]::GetFullPath($Repo))
+        $path = Resolve-PhysicalReviewPath (Join-Path $root $Relative)
+        $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        $prefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        if (-not $path.StartsWith($prefix, $comparison) -or -not [IO.File]::Exists($path)) {
+            throw "file resolves outside repository or is missing: $Relative"
+        }
+        return $path
+    }
 
     if (-not (Test-Path -LiteralPath $Result -PathType Leaf)) { throw "Result file not found: $Result" }
     $Data = Get-Content -LiteralPath $Result -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -101,11 +127,12 @@ function Test-IntakeReviewResult {
         if (-not (Test-Relative $Path) -or -not $TargetPaths.Add($Path)) { $Errors.Add("${Label}.path must be unique and repository-relative") }
         $TargetRoles[$Path] = $Role
         if ($Digest -notmatch '^[0-9a-f]{64}$') { $Errors.Add("${Label}.normalizedSha256 is invalid") }
-        $TargetPath = Join-Path ([IO.Path]::GetFullPath($Repo)) $Path
-        if (-not (Test-Path -LiteralPath $TargetPath -PathType Leaf)) { $Errors.Add("target missing: $Path") }
-        else {
-            try { $Actual = Get-NormalizedHash $TargetPath } catch { $Errors.Add("target ${Path}: $($_.Exception.Message)"); $Actual = '' }
-            if ($Actual -and $Actual -ne $Digest) { $Errors.Add("target hash drift: $Path") }
+        try {
+            $TargetPath = Resolve-ReviewEvidencePath $Path
+            $Actual = Get-NormalizedHash $TargetPath
+            if ($Actual -ne $Digest) { $Errors.Add("target hash drift: $Path") }
+        } catch {
+            $Errors.Add("target ${Path}: $($_.Exception.Message)")
         }
     }
 
@@ -124,27 +151,21 @@ function Test-IntakeReviewResult {
             if ($RequestDigest -notmatch '^[0-9a-f]{64}$') {
                 Add-GraphError 'IRG001' 'requestEvidence.normalizedSha256 is invalid'
             }
-            $RequestPath = Join-Path ([IO.Path]::GetFullPath($Repo)) $RequestPathText
             $RequestData = $null
             $ActualRequestDigest = ''
-            if (-not (Test-Path -LiteralPath $RequestPath -PathType Leaf)) {
-                Add-GraphError 'IRG001' "request missing: $RequestPathText"
-            }
-            else {
-                try {
+            try {
+                    $RequestPath = Resolve-ReviewEvidencePath $RequestPathText
                     $RequestBytes = Get-NormalizedBytes $RequestPath
                     $ActualRequestDigest = [Convert]::ToHexString(
                         [Security.Cryptography.SHA256]::HashData($RequestBytes)
                     ).ToLowerInvariant()
                     $RequestText = [Text.UTF8Encoding]::new($false, $true).GetString($RequestBytes)
                     $RequestData = $RequestText | ConvertFrom-Json
-                }
-                catch {
-                    Add-GraphError 'IRG001' "invalid request: $($_.Exception.Message)"
-                }
-                if ($ActualRequestDigest -and $ActualRequestDigest -ne $RequestDigest) {
-                    Add-GraphError 'IRG001' 'request hash drift'
-                }
+            } catch {
+                Add-GraphError 'IRG001' "invalid request: $($_.Exception.Message)"
+            }
+            if ($ActualRequestDigest -and $ActualRequestDigest -ne $RequestDigest) {
+                Add-GraphError 'IRG001' 'request hash drift'
             }
 
             if ($null -ne $RequestData) {

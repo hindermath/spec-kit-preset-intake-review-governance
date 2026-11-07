@@ -39,7 +39,18 @@ def required_text(obj, key, label):
 
 def relative(value):
     p = PurePosixPath(value)
-    return not p.is_absolute() and ".." not in p.parts
+    return not p.is_absolute() and ".." not in p.parts and "\\" not in value
+
+def confined_file(value):
+    if not relative(value):
+        raise ValueError("path must be repository-relative")
+    try:
+        path = (repo / value).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"file missing: {value}") from exc
+    if not path.is_relative_to(repo) or not path.is_file():
+        raise ValueError(f"file resolves outside repository: {value}")
+    return path
 
 def normalized(path):
     raw = path.read_bytes()
@@ -97,13 +108,13 @@ for i, target in enumerate(targets):
     target_paths.add(path_text)
     target_roles[path_text] = role
     if not re.fullmatch(r"[0-9a-f]{64}", digest): errors.append(f"{label}.normalizedSha256 is invalid")
-    target_path = repo / path_text
-    if not target_path.is_file(): errors.append(f"target missing: {path_text}")
+    try:
+        target_path = confined_file(path_text)
+        actual = hashlib.sha256(normalized(target_path)).hexdigest()
+    except ValueError as exc:
+        errors.append(f"target {path_text}: {exc}")
     else:
-        try: actual = hashlib.sha256(normalized(target_path)).hexdigest()
-        except ValueError as exc: errors.append(f"target {path_text}: {exc}")
-        else:
-            if actual != digest: errors.append(f"target hash drift: {path_text}")
+        if actual != digest: errors.append(f"target hash drift: {path_text}")
 
 request_evidence = data.get("requestEvidence")
 request_binding_required = mode == "Series" or request_evidence is not None
@@ -117,20 +128,17 @@ if request_binding_required:
             graph_error("IRG001", "requestEvidence.path must be repository-relative")
         if not re.fullmatch(r"[0-9a-f]{64}", request_digest):
             graph_error("IRG001", "requestEvidence.normalizedSha256 is invalid")
-        request_path = repo / request_path_text
         request_data = None
-        if not request_path.is_file():
-            graph_error("IRG001", f"request missing: {request_path_text}")
-        else:
-            try:
+        try:
+                request_path = confined_file(request_path_text)
                 request_bytes = normalized(request_path)
                 actual_request_digest = hashlib.sha256(request_bytes).hexdigest()
                 request_data = json.loads(request_bytes.decode("utf-8"))
-            except (ValueError, json.JSONDecodeError) as exc:
-                graph_error("IRG001", f"invalid request: {exc}")
-            else:
-                if actual_request_digest != request_digest:
-                    graph_error("IRG001", "request hash drift")
+        except (ValueError, json.JSONDecodeError) as exc:
+            graph_error("IRG001", f"invalid request: {exc}")
+        else:
+            if actual_request_digest != request_digest:
+                graph_error("IRG001", "request hash drift")
         if request_data is not None:
             if not isinstance(request_data, dict):
                 graph_error("IRG002", "request root must be an object")

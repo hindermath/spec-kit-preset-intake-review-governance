@@ -6,7 +6,9 @@ $ErrorActionPreference = 'Stop'
 
 $PresetRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) "intake-review-$([Guid]::NewGuid())"
+$OutsideRoot = "${TempRoot}-outside"
 New-Item -ItemType Directory -Path (Join-Path $TempRoot 'intakes') -Force | Out-Null
+New-Item -ItemType Directory -Path $OutsideRoot -Force | Out-Null
 
 function Get-NormalizedHash([string]$Path) {
     $Utf8 = [Text.UTF8Encoding]::new($false, $true)
@@ -330,7 +332,31 @@ try {
         })
     }
 
+    Reset-SeriesFixture
+    $insideTarget = Join-Path $TempRoot 'intakes/a.md'
+    $outsideTarget = Join-Path $OutsideRoot 'a.md'
+    Copy-Item -LiteralPath $insideTarget -Destination $outsideTarget
+    Remove-Item -LiteralPath $insideTarget
+    [void](New-Item -ItemType SymbolicLink -Path $insideTarget -Target $outsideTarget)
+    foreach ($shell in @('Bash', 'PowerShell')) {
+        $output = Invoke-Validator $shell 2
+        if ($output -notmatch 'outside repository') { throw "$shell did not identify external target symlink: $output" }
+    }
+    Remove-Item -LiteralPath $insideTarget -Force
+
+    Reset-SeriesFixture
+    $insideRequest = Join-Path $TempRoot 'request.json'
+    $outsideRequest = Join-Path $OutsideRoot 'request.json'
+    Copy-Item -LiteralPath $insideRequest -Destination $outsideRequest
+    Remove-Item -LiteralPath $insideRequest
+    [void](New-Item -ItemType SymbolicLink -Path $insideRequest -Target $outsideRequest)
+    foreach ($shell in @('Bash', 'PowerShell')) {
+        $output = Invoke-Validator $shell 2
+        if ($output -notmatch 'outside repository') { throw "$shell did not identify external request symlink: $output" }
+    }
+
     Write-Output 'PASS: intake-review validator parity, Series 1.1 graph contract, and negative cases'
 } finally {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $OutsideRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
