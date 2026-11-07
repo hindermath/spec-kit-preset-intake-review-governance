@@ -355,6 +355,45 @@ try {
         if ($output -notmatch 'outside repository') { throw "$shell did not identify external request symlink: $output" }
     }
 
+    $fieldRoot = Join-Path $TempRoot 'field/evidence/immutable'
+    $fieldRepo = Join-Path $TempRoot 'field/runtime/worktrees/example-unit-03'
+    [void](New-Item -ItemType Directory -Path $fieldRoot -Force)
+    [void](New-Item -ItemType Directory -Path $fieldRepo -Force)
+    $fieldCampaign = [ordered]@{
+        schemaVersion = '1.0'; deliveryMode = 'LocalImplementation'
+        workers = @([ordered]@{
+            workerId = 'example-unit-00'; repository = 'N/A'; featureInput = '../../../outside.md'; dependsOn = @()
+        })
+    }
+    Save-Json $fieldCampaign (Join-Path $fieldRoot 'parallel-campaign.json')
+    Save-Json ([ordered]@{ schemaVersion = '1.0'; profiles = [ordered]@{} }) `
+        (Join-Path $fieldRoot 'parallel-runner-profiles.json')
+    $fieldScript = Join-Path $PresetRoot 'tests/test-secure-casetracker-field.ps1'
+    $fieldOutput = & pwsh -NoProfile -File $fieldScript -EvidenceRoot $fieldRoot `
+        -CoordinatorPath $fieldScript 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($fieldOutput -join "`n") -notmatch 'Unsicherer featureInput') {
+        throw "Field fixture accepted traversal or failed elsewhere: $fieldOutput"
+    }
+    $fieldCampaign.workers[0].workerId = '../escape-unit-00'
+    $fieldCampaign.workers[0].featureInput = 'safe.md'
+    Save-Json $fieldCampaign (Join-Path $fieldRoot 'parallel-campaign.json')
+    $fieldOutput = & pwsh -NoProfile -File $fieldScript -EvidenceRoot $fieldRoot `
+        -CoordinatorPath $fieldScript 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($fieldOutput -join "`n") -notmatch 'Unsicherer workerId') {
+        throw "Field fixture accepted workerId traversal or failed elsewhere: $fieldOutput"
+    }
+    $fieldCampaign.workers[0].workerId = 'example-unit-00'
+    $fieldCampaign.workers[0].featureInput = 'linked.md'
+    Save-Json $fieldCampaign (Join-Path $fieldRoot 'parallel-campaign.json')
+    $outsideFieldInput = Join-Path $TempRoot 'field/outside.md'
+    'external fixture input' | Set-Content -LiteralPath $outsideFieldInput -Encoding utf8NoBOM
+    [void](New-Item -ItemType SymbolicLink -Path (Join-Path $fieldRepo 'linked.md') -Target $outsideFieldInput)
+    $fieldOutput = & pwsh -NoProfile -File $fieldScript -EvidenceRoot $fieldRoot `
+        -CoordinatorPath $fieldScript 2>&1
+    if ($LASTEXITCODE -eq 0 -or ($fieldOutput -join "`n") -notmatch 'featureInput verlaesst') {
+        throw "Field fixture accepted external featureInput symlink or failed elsewhere: $fieldOutput"
+    }
+
     Write-Output 'PASS: intake-review validator parity, Series 1.1 graph contract, and negative cases'
 } finally {
     Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
